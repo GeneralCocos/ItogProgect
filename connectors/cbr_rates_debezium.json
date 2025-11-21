@@ -1,0 +1,30 @@
+{
+  "name": "cbr-rates-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+
+    "database.hostname": "postgres-raw",
+    "database.port": "5432",
+    "database.user": "airflow",
+    "database.password": "airflow",
+    "database.dbname": "airflow",
+
+    "topic.prefix": "postgres_raw",
+    "plugin.name": "pgoutput",
+
+    "slot.name": "cbr_rates_slot",
+    "publication.name": "cbr_rates_pub",
+    "publication.autocreate.mode": "filtered",
+
+    "schema.include.list": "raw",
+    "table.include.list": "raw.cbr_daily_rates",
+
+    "snapshot.mode": "initial",
+    "tombstones.on.delete": "false",
+    "include.schema.changes": "false",
+
+    "decimal.handling.mode": "double",
+    "time.precision.mode": "adaptive_time_microseconds"
+  }
+}

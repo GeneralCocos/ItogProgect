@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   postgres-raw:
     image: postgres:16
@@ -12,10 +14,310 @@ services:
       - ./db/postgres_raw/init:/docker-entrypoint-initdb.d
       - postgres_raw_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      test: [ "CMD-SHELL", "pg_isready -U airflow" ]
       interval: 10s
       timeout: 5s
       retries: 5
+    command: >
+      postgres
+      -c wal_level=logical
+      -c max_replication_slots=10
+      -c max_wal_senders=10
+      -c max_connections=200
+    networks: [kafka_net]
+
+  zookeeper-1:
+    image: confluentinc/cp-zookeeper:7.9.0
+    container_name: zookeeper-1
+    hostname: zookeeper-1
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_SERVER_ID: 1
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_INIT_LIMIT: 5
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_SERVERS: "zookeeper-1:2888:3888;zookeeper-2:2888:3888;zookeeper-3:2888:3888"
+    networks: [kafka_net]
+
+  zookeeper-2:
+    image: confluentinc/cp-zookeeper:7.9.0
+    container_name: zookeeper-2
+    hostname: zookeeper-2
+    ports:
+      - "2182:2181"
+    environment:
+      ZOOKEEPER_SERVER_ID: 2
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_INIT_LIMIT: 5
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_SERVERS: "zookeeper-1:2888:3888;zookeeper-2:2888:3888;zookeeper-3:2888:3888"
+    networks: [kafka_net]
+
+  zookeeper-3:
+    image: confluentinc/cp-zookeeper:7.9.0
+    container_name: zookeeper-3
+    hostname: zookeeper-3
+    ports:
+      - "2183:2181"
+    environment:
+      ZOOKEEPER_SERVER_ID: 3
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_INIT_LIMIT: 5
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_SERVERS: "zookeeper-1:2888:3888;zookeeper-2:2888:3888;zookeeper-3:2888:3888"
+    networks: [kafka_net]
+
+  kafka-broker-1:
+    image: confluentinc/cp-kafka:7.9.0
+    container_name: kafka-broker-1
+    depends_on:
+      zookeeper-1:
+        condition: service_started
+      zookeeper-2:
+        condition: service_started
+      zookeeper-3:
+        condition: service_started
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker-1:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "kafka-topics --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [kafka_net]
+
+  kafka-broker-2:
+    image: confluentinc/cp-kafka:7.9.0
+    container_name: kafka-broker-2
+    depends_on:
+      zookeeper-1:
+        condition: service_started
+      zookeeper-2:
+        condition: service_started
+      zookeeper-3:
+        condition: service_started
+      kafka-broker-1:
+        condition: service_healthy
+    ports:
+      - "9093:9093"
+      - "29093:29092"
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker-2:29092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "kafka-topics --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [kafka_net]
+
+  kafka-broker-3:
+    image: confluentinc/cp-kafka:7.9.0
+    container_name: kafka-broker-3
+    depends_on:
+      zookeeper-1:
+        condition: service_started
+      zookeeper-2:
+        condition: service_started
+      zookeeper-3:
+        condition: service_started
+      kafka-broker-1:
+        condition: service_healthy
+    ports:
+      - "9094:9094"
+      - "29094:29092"
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker-3:29092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "kafka-topics --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [kafka_net]
+
+  schema-registry-1:
+    image: confluentinc/cp-schema-registry:7.9.0
+    container_name: schema-registry-1
+    hostname: schema-registry-1
+    depends_on:
+      kafka-broker-1:
+        condition: service_healthy
+      kafka-broker-2:
+        condition: service_started
+      kafka-broker-3:
+        condition: service_started
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry-1
+      SCHEMA_REGISTRY_LISTENERS: "http://0.0.0.0:8081"
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: "kafka-broker-1:29092,kafka-broker-2:29092,kafka-broker-3:29092"
+      SCHEMA_REGISTRY_SCHEMA_REGISTRY_GROUP_ID: "schema-registry-cluster"
+      SCHEMA_REGISTRY_MASTER_ELIGIBILITY: "true"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8081/subjects" ]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    networks:
+      kafka_net:
+        aliases: [schema-registry]
+
+  schema-registry-2:
+    image: confluentinc/cp-schema-registry:7.9.0
+    container_name: schema-registry-2
+    hostname: schema-registry-2
+    depends_on:
+      kafka-broker-1:
+        condition: service_healthy
+      kafka-broker-2:
+        condition: service_started
+      kafka-broker-3:
+        condition: service_started
+      schema-registry-1:
+        condition: service_healthy
+    ports:
+      - "8082:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry-2
+      SCHEMA_REGISTRY_LISTENERS: "http://0.0.0.0:8081"
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: "kafka-broker-1:29092,kafka-broker-2:29092,kafka-broker-3:29092"
+      SCHEMA_REGISTRY_SCHEMA_REGISTRY_GROUP_ID: "schema-registry-cluster"
+      SCHEMA_REGISTRY_MASTER_ELIGIBILITY: "true"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8081/subjects" ]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    networks:
+      kafka_net:
+        aliases: [schema-registry]
+
+  schema-registry-3:
+    image: confluentinc/cp-schema-registry:7.9.0
+    container_name: schema-registry-3
+    hostname: schema-registry-3
+    depends_on:
+      kafka-broker-1:
+        condition: service_healthy
+      kafka-broker-2:
+        condition: service_started
+      kafka-broker-3:
+        condition: service_started
+      schema-registry-1:
+        condition: service_healthy
+    ports:
+      - "8084:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry-3
+      SCHEMA_REGISTRY_LISTENERS: "http://0.0.0.0:8081"
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: "kafka-broker-1:29092,kafka-broker-2:29092,kafka-broker-3:29092"
+      SCHEMA_REGISTRY_SCHEMA_REGISTRY_GROUP_ID: "schema-registry-cluster"
+      SCHEMA_REGISTRY_MASTER_ELIGIBILITY: "true"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8081/subjects" ]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    networks:
+      kafka_net:
+        aliases: [schema-registry]
+
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      kafka-broker-1:
+        condition: service_healthy
+      kafka-broker-2:
+        condition: service_started
+      kafka-broker-3:
+        condition: service_started
+      schema-registry-1:
+        condition: service_started
+    ports:
+      - "9000:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: "kafka-broker-1:29092,kafka-broker-2:29092,kafka-broker-3:29092"
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: "http://schema-registry:8081"
+    networks: [kafka_net]
+
+  kafka-connect:
+    image: debezium/connect:2.6
+    container_name: kafka-connect
+    depends_on:
+      kafka-broker-1:
+        condition: service_healthy
+      kafka-broker-2:
+        condition: service_started
+      kafka-broker-3:
+        condition: service_started
+      postgres-raw:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: "kafka-broker-1:29092,kafka-broker-2:29092,kafka-broker-3:29092"
+      GROUP_ID: "connect-cluster"
+      CONFIG_STORAGE_TOPIC: "connect-configs"
+      OFFSET_STORAGE_TOPIC: "connect-offsets"
+      STATUS_STORAGE_TOPIC: "connect-status"
+      CONFIG_STORAGE_REPLICATION_FACTOR: "3"
+      OFFSET_STORAGE_REPLICATION_FACTOR: "3"
+      STATUS_STORAGE_REPLICATION_FACTOR: "3"
+      KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      REST_PORT: "8083"
+      REST_ADVERTISED_HOST_NAME: "kafka-connect"
+    networks: [kafka_net]
 
   airflow-init:
     image: apache/airflow:2.9.0
@@ -23,12 +325,10 @@ services:
     user: "${AIRFLOW_UID:-50000}:0"
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      # ✅ валидный Fernet key (32 байта, base64, 44 символа)
       AIRFLOW__CORE__FERNET_KEY: "pZp9n6uN4eW1U1zszbmWzxubUoilKx2oyS9MhUlCT3c="
       AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-raw:5432/airflow
-      # ✅ любой рандомный секрет для webserver
       AIRFLOW__WEBSERVER__SECRET_KEY: "CHANGE_ME_SUPER_SECRET_1234567890"
       AIRFLOW__CORE__DEFAULT_TIMEZONE: "Europe/Moscow"
     volumes:
@@ -44,7 +344,6 @@ services:
       - |
         echo "Initializing Airflow DB..."
         airflow db init
-        echo "Creating admin user..."
         airflow users create \
           --username admin \
           --firstname Admin \
@@ -54,6 +353,7 @@ services:
           --password admin
         echo "Airflow init done."
     restart: "no"
+    networks: [kafka_net]
 
   airflow-webserver:
     image: apache/airflow:2.9.0
@@ -62,11 +362,10 @@ services:
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__FERNET_KEY: "pZp9n6uN4eW1U1zszbmWzxubUoilKx2oyS9MhUlCT3c="
-      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-raw:5432/airflow
       AIRFLOW__WEBSERVER__SECRET_KEY: "CHANGE_ME_SUPER_SECRET_1234567890"
       AIRFLOW__CORE__DEFAULT_TIMEZONE: "Europe/Moscow"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     command: webserver
     ports:
       - "8080:8080"
@@ -78,6 +377,7 @@ services:
       airflow-init:
         condition: service_completed_successfully
     restart: always
+    networks: [kafka_net]
 
   airflow-scheduler:
     image: apache/airflow:2.9.0
@@ -86,11 +386,10 @@ services:
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__FERNET_KEY: "pZp9n6uN4eW1U1zszbmWzxubUoilKx2oyS9MhUlCT3c="
-      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-raw:5432/airflow
       AIRFLOW__WEBSERVER__SECRET_KEY: "CHANGE_ME_SUPER_SECRET_1234567890"
       AIRFLOW__CORE__DEFAULT_TIMEZONE: "Europe/Moscow"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     command: scheduler
     volumes:
       - ./airflow/dags:/opt/airflow/dags
@@ -100,6 +399,11 @@ services:
       airflow-init:
         condition: service_completed_successfully
     restart: always
+    networks: [kafka_net]
+
+networks:
+  kafka_net:
+    driver: bridge
 
 volumes:
   postgres_raw_data:
